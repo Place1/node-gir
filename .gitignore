@@ -7,3 +7,9 @@ tests/midgard/test_data/*.db
 # debugging
 .gdb_history
 peda-session-*
+
+# editors
+*~
+\#*\#
+.\#*
+idea/
