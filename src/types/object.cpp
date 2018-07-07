@@ -390,27 +390,8 @@ NAN_METHOD(GIRObject::connect) {
         return;
     }
 
-    // query for in-depth information about the target signal
-    // we can pass this to our closure constructor later so that it can
-    // find the GI type info for the signal.
-    GSignalQuery signal_query;
-    g_signal_query(signal_id, &signal_query);
-
-    auto target_info = GIRInfoUniquePtr(g_irepository_find_by_gtype(g_irepository_get_default(), signal_query.itype));
-    if (target_info == nullptr) {
-        Nan::ThrowError("unknown signal");
-        return;
-    }
-
-    GIRInfoUniquePtr signal_info = nullptr;
-    if (GI_IS_OBJECT_INFO(target_info.get())) {
-        signal_info = GIRInfoUniquePtr(g_object_info_find_signal(target_info.get(), signal_name));
-    } else if (GI_IS_INTERFACE_INFO(target_info.get())) {
-        signal_info = GIRInfoUniquePtr(g_interface_info_find_signal(target_info.get(), signal_name));
-    }
-
     // create a closure that will manage the signal callback to JS callback for us
-    GClosure *closure = GIRClosure::create(signal_info.get(), callback);
+    GClosure *closure = GIRClosure::create_signal_closure(signal_id, signal_name, callback);
     if (closure == nullptr) {
         Nan::ThrowError("unknown signal");
         return;

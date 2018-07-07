@@ -1,4 +1,5 @@
 const { Gtk } = require('../');
+const Gdk = require('../').load('Gdk');
 
 describe('signals', () => {
   test('connect() returns a number', () => {
@@ -47,5 +48,16 @@ describe('signals', () => {
       done();
     });
     entry.setText('dummy text');
+  });
+
+  test('signals for property change notifications should work', (done) => {
+    // these signals are a little bit interesting because they sometimes (maybe always?)
+    // don't have GICallableInfo associated with the signal. That's why we're testing them
+    // explicitly.
+    const button = new Gtk.ColorButton()
+    button.connect('notify::color', () => {
+      done();
+    });
+    button.setColor(new Gdk.Color({ red: 0, green: 0, blue: 0 }));
   });
 });

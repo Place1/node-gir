@@ -7,6 +7,7 @@
 #include "arguments.h"
 #include "exceptions.h"
 #include "types/object.h"
+#include "types/param_spec.h"
 #include "types/struct.h"
 
 using namespace v8;
@@ -65,6 +66,9 @@ Local<Value> GIRValue::from_g_value(const GValue *gvalue, GITypeInfo *type_info)
         case G_TYPE_STRING:
             return Nan::New(g_value_get_string(gvalue)).ToLocalChecked();
 
+        case G_TYPE_PARAM:
+            return GIRParamSpec::from_existing(g_value_get_param(gvalue));
+
         case G_TYPE_BOXED:
             if (G_VALUE_TYPE(gvalue) == G_TYPE_ARRAY) {
                 throw UnsupportedGValueType("GIRValue - GValueArray conversion not supported");
@@ -80,7 +84,10 @@ Local<Value> GIRValue::from_g_value(const GValue *gvalue, GITypeInfo *type_info)
         } break;
 
         default:
-            throw UnsupportedGValueType("GIRValue - conversion of input type not supported");
+            stringstream message;
+            message << "GIRValue - conversion of input type '" << g_type_name(G_VALUE_TYPE(gvalue))
+                    << "' not supported";
+            throw UnsupportedGValueType(message.str());
     }
 }
 

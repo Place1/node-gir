@@ -12,8 +12,9 @@
                 'src/types/struct.cpp',
                 'src/types/function.cpp',
                 'src/types/enum.cpp',
+                'src/types/param_spec.cpp',
                 'src/loop.cpp',
-                'src/closure.cpp'
+                'src/closure.cpp',
             ],
             'include_dirs': [
                 '<!(node -e "require(\'nan\')")',
