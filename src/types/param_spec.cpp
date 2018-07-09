@@ -2,7 +2,6 @@
 
 #include "types/param_spec.h"
 
-
 namespace gir {
 
 Nan::Persistent<Function> GIRParamSpec::instance_constructor;

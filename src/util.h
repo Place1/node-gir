@@ -67,6 +67,12 @@ vector<TV> extract_values(map<TK, TV> &input_map) {
     }
     return retval;
 }
+
+template<typename P, typename T>
+bool instance_of(T *instance) {
+    return dynamic_cast<P *>(instance) != nullptr;
+}
+
 } // namespace Util
 
 } // namespace gir

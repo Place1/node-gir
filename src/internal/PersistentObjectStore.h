@@ -4,13 +4,14 @@
 
 namespace gir {
 
-template<class KeyType, class PersistentType> class PersistentObjectStore {
+template<class KeyType, class PersistentType>
+class PersistentObjectStore {
 public:
     PersistentObjectStore() = default;
 
     ~PersistentObjectStore() {
         for (auto &keyValue : persistentObjects)
-            keyValue.second.Empty();  // Disposes of the persistent's handle
+            keyValue.second.Empty(); // Disposes of the persistent's handle
     };
 
     PersistentType &at(const KeyType &key) {
@@ -29,4 +30,4 @@ private:
     std::map<KeyType, PersistentType> persistentObjects;
 };
 
-}
+} // namespace gir

@@ -6,6 +6,7 @@
 #include <sstream>
 #include "arguments.h"
 #include "exceptions.h"
+#include "type.h"
 #include "types/object.h"
 #include "types/param_spec.h"
 #include "types/struct.h"
@@ -199,6 +200,80 @@ GValue GIRValue::to_g_value(Local<Value> js_value, GType g_type) {
             break;
     }
     return g_value;
+}
+
+void *GIRValue::to_c_array(Local<Value> value, GITypeInfo *type_info) {
+    bool is_zero_terminated = g_type_info_is_zero_terminated(type_info);
+
+    if (value->IsString()) {
+        Local<String> string = value->ToString();
+        const char *utf8_data = *Nan::Utf8String(string);
+        return g_strdup(utf8_data);
+    }
+
+    if (!value->IsArray()) {
+        throw JSValueError("expected value to be an array");
+    }
+
+    Local<Array> array = Local<Array>::Cast(value->ToObject());
+    int length = array->Length();
+
+    auto element_info = GIRInfoUniquePtr(g_type_info_get_param_type(type_info, 0));
+    gsize element_size = get_type_size(element_info.get());
+
+    void *result = malloc(element_size * (length + (is_zero_terminated ? 1 : 0)));
+
+    for (int i = 0; i < length; i++) {
+        auto value = array->Get(i);
+        GIArgument arg = Args::type_to_g_type(*element_info.get(), value);
+        void *pointer = (void *)((ulong)result + i * element_size);
+        memcpy(pointer, &arg, element_size);
+    }
+
+    if (is_zero_terminated) {
+        void *pointer = (void *)((ulong)result + length * element_size);
+        memset(pointer, 0, element_size);
+    }
+
+    return result;
+}
+
+GArray *GIRValue::to_g_array(Local<Value> value, GITypeInfo *type_info) {
+    GArray* g_array = nullptr;
+    bool zero_terminated = g_type_info_is_zero_terminated(type_info);
+
+    if (value->IsString()) {
+        Local<String> string = value->ToString();
+        int length = string->Length();
+
+        if (length == 0) {
+            return g_array_new(zero_terminated, true, sizeof(char));
+        }
+
+        const char *utf8_data = *Nan::Utf8String(string);
+        g_array = g_array_sized_new (zero_terminated, false, sizeof (char), length);
+        return g_array_append_vals(g_array, utf8_data, length);
+
+    } else if (value->IsArray ()) {
+        auto array = Local<Array>::Cast (value->ToObject ());
+        int length = array->Length ();
+
+        auto element_info = GIRInfoUniquePtr(g_type_info_get_param_type(type_info, 0));
+        gsize element_size = get_type_size(element_info.get());
+
+        // FIXME this is so wrong
+        g_array = g_array_sized_new(zero_terminated, true, element_size, length);
+
+        for (int i = 0; i < length; i++) {
+            auto value = array->Get(i);
+            GIArgument arg = Args::type_to_g_type(*element_info.get(), value);
+            g_array_append_val(g_array, arg);
+        }
+    } else {
+        throw JSValueError("expected an array");
+    }
+
+    return g_array;
 }
 
 GType GIRValue::guess_type(Handle<Value> value) {

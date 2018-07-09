@@ -55,7 +55,7 @@ void GIRClosure::ffi_closure_callback(ffi_cif *cif, void *result, void **args, g
                 // skip void arguments
                 continue;
             }
-            js_args.push_back(Args::from_g_type(gi_args[i], arg_type_info.get(), 0));
+            js_args.push_back(Args::from_g_type(gi_args[i], arg_type_info.get()));
         }
     }
     Local<Function> js_callback = Nan::New<Function>(gir_closure->callback);

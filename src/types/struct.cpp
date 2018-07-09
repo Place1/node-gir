@@ -71,7 +71,7 @@ Local<Function> GIRStruct::prepare(GIStructInfo *info) {
     // to the JS function (constructor)
     Local<FunctionTemplate> object_template = Nan::New<FunctionTemplate>(GIRStruct::constructor, struct_info_extern);
     GIRStruct::prepared_js_classes.insert(
-            make_pair(g_registered_type_info_get_g_type(info), PersistentFunctionTemplate(object_template)));
+        make_pair(g_registered_type_info_get_g_type(info), PersistentFunctionTemplate(object_template)));
 
     object_template->SetClassName(Nan::New(name).ToLocalChecked());
 
@@ -142,7 +142,6 @@ GIRInfoUniquePtr GIRStruct::find_native_constructor(GIStructInfo *struct_info) {
 NAN_METHOD(GIRStruct::constructor) {
     Local<External> struct_info_extern = Local<External>::Cast(info.Data());
     GIStructInfo *struct_info = (GIStructInfo *)struct_info_extern->Value();
-    auto name = g_base_info_get_name(struct_info);
     GIRStruct *obj = new GIRStruct();
     obj->struct_info = GIRInfoUniquePtr(struct_info);
 
@@ -222,7 +221,7 @@ NAN_PROPERTY_GETTER(GIRStruct::property_get_handler) {
 
     // converty the native value to a JS value
     auto type_info = GIRInfoUniquePtr(g_field_info_get_type(field_info.get()));
-    Local<Value> res = Args::from_g_type(&native_field_value, type_info.get(), 0);
+    Local<Value> res = Args::from_g_type(&native_field_value, type_info.get());
     info.GetReturnValue().Set(res);
     return;
 }
