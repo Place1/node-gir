@@ -1,3 +1,7 @@
+# Abandoned
+
+I currently don't have enough time to properly develop this library. If you're keen to contribute in this space have a look at: https://github.com/romgrk/node-gtk
+
 # node-gir
 
 [![CircleCI](https://circleci.com/gh/Place1/node-gir/tree/master.svg?style=svg)](https://circleci.com/gh/Place1/node-gir/tree/master)
