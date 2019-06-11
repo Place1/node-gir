@@ -1,17 +1,19 @@
 #include "arguments.h"
-#include "values.h"
 
 #include <cstring>
 #include <sstream>
 #include <vector>
 #include "closure.h"
 #include "exceptions.h"
+#include "type.h"
 #include "types/object.h"
 #include "types/struct.h"
-
-using namespace v8;
+#include "util.h"
+#include "values.h"
 
 namespace gir {
+
+using namespace v8;
 
 Args::Args(GICallableInfo *callable_info) : callable_info(callable_info) {
     g_base_info_ref(callable_info); // because we keep a reference to the info we need to tell glib
@@ -33,31 +35,41 @@ void Args::load_js_arguments(const Nan::FunctionCallbackInfo<v8::Value> &js_call
     // convert it into a GIArgument, adding it to the in/out args array depending
     // on it's direction.
     for (guint8 i = 0; i < gi_argc; i++) {
-        GIArgInfo argument_info;
-        g_callable_info_load_arg(this->callable_info.get(), i, &argument_info);
-        GIDirection argument_direction = g_arg_info_get_direction(&argument_info);
+        GIArgInfo *argument_info = g_callable_info_get_arg(this->callable_info.get(), i);
 
-        if (argument_direction == GI_DIRECTION_IN) {
-            GIArgument argument = Args::arg_to_g_type(argument_info, js_callback_info[i]);
-            this->in.push_back(argument);
+        switch (g_arg_info_get_direction(argument_info)) {
+            case GI_DIRECTION_IN:
+                this->params.push_back(new InParameter(Args::arg_to_g_type(*argument_info, js_callback_info[i])));
+                break;
+
+            case GI_DIRECTION_OUT:
+                this->params.push_back(new OutParameter(argument_info));
+                break;
+
+            case GI_DIRECTION_INOUT:
+                this->params.push_back(new InOutParameter(Args::arg_to_g_type(*argument_info, js_callback_info[i])));
+                break;
         }
 
-        if (argument_direction == GI_DIRECTION_OUT) {
-            GIArgument argument = this->get_out_argument_value(argument_info);
-            this->out.push_back(argument);
-        }
+        // if (argument_direction == GI_DIRECTION_OUT) {
+        //     GIArgument argument =
+        //     this->out.push_back(argument);
+        //     this->all.push_back(argument);
+        // }
 
-        if (argument_direction == GI_DIRECTION_INOUT) {
-            GIArgument argument = Args::arg_to_g_type(argument_info, js_callback_info[i]);
-            this->in.push_back(argument);
+        // if (argument_direction == GI_DIRECTION_INOUT) {
+        //     GIArgument argument = Args::arg_to_g_type(argument_info, js_callback_info[i]);
+        //     this->in.push_back(argument);
 
-            // TODO: is it correct to handle INOUT arguments like IN args?
-            // do we need to handle callee (native) allocates or empty input
-            // GIArguments like we do with OUT args? i'm just assuming this is how it
-            // should work (treating it like an IN arg). Hopfully I can find some
-            // examples to make some test cases asserting the correct behaviour
-            this->out.push_back(argument);
-        }
+        //     // TODO: is it correct to handle INOUT arguments like IN args?
+        //     // do we need to handle callee (native) allocates or empty input
+        //     // GIArguments like we do with OUT args? i'm just assuming this is how it
+        //     // should work (treating it like an IN arg). Hopfully I can find some
+        //     // examples to make some test cases asserting the correct behaviour
+        //     this->out.push_back(argument);
+
+        //     this->all.push_back(argument);
+        // }
     }
 }
 
@@ -70,67 +82,39 @@ void Args::load_context(GObject *this_object) {
     GIArgument this_object_argument = {
         .v_pointer = this_object,
     };
-    this->in.insert(this->in.begin(), this_object_argument);
+    this->params.insert(this->params.begin(), new InParameter(this_object_argument));
 }
 
-GIArgument Args::get_out_argument_value(GIArgInfo &argument_info) {
-    GITypeInfo argument_type_info;
-    g_arg_info_load_type(&argument_info, &argument_type_info);
-    if (g_arg_info_is_caller_allocates(&argument_info)) {
-        GITypeTag arg_type_tag = g_type_info_get_tag(&argument_type_info);
-        // If the caller is responsible for allocating the out arguments memeory
-        // then we'll have to look up the argument's type infomation and allocate
-        // a slice of memory for the GIArgument's .v_pointer (native function will
-        // fill it up)
-        if (arg_type_tag == GI_TYPE_TAG_INTERFACE) {
-            GIRInfoUniquePtr argument_interface_info = GIRInfoUniquePtr(g_type_info_get_interface(&argument_type_info));
-            GIInfoType argument_interface_type = g_base_info_get_type(argument_interface_info.get());
-            gsize argument_size;
+vector<GIArgument> Args::get_in_args() {
+    vector<Parameter *> in_params;
+    copy_if(this->params.begin(), this->params.end(), back_inserter(in_params), [](auto param) {
+        return Util::instance_of<InParameter>(param) || Util::instance_of<InOutParameter>(param);
+    });
+    vector<GIArgument> in_args;
+    transform(in_params.begin(), in_params.end(), back_inserter(in_args), [](auto param) {
+        return param->get_argument();
+    });
+    return in_args;
+}
 
-            if (argument_interface_type == GI_INFO_TYPE_STRUCT) {
-                argument_size = g_struct_info_get_size((GIStructInfo *)argument_interface_info.get());
-            } else if (argument_interface_type == GI_INFO_TYPE_UNION) {
-                argument_size = g_union_info_get_size((GIUnionInfo *)argument_interface_info.get());
-            } else {
-                stringstream message;
-                message << "type \"" << g_type_tag_to_string(arg_type_tag) << "\" for out caller-allocates";
-                message << " Expected a struct or union.";
-                throw UnsupportedGIType(message.str());
-            }
+vector<GIArgument> Args::get_out_args() {
+    vector<Parameter *> out_params;
+    copy_if(this->params.begin(), this->params.end(), back_inserter(out_params), [](auto param) {
+        return Util::instance_of<OutParameter>(param) || Util::instance_of<InOutParameter>(param);
+    });
+    vector<GIArgument> in_args;
+    transform(out_params.begin(), out_params.end(), back_inserter(in_args), [](auto param) {
+        return param->get_argument();
+    });
+    return in_args;
+}
 
-            GIArgument argument;
-            // FIXME: who deallocates?
-            // I imagine the original function caller (in JS land) will need
-            // to use the structure that the native function puts into this
-            // slice of memory, meaning we can't deallocate when Args is destroyed.
-            // Perhaps we should research into GJS and PyGObject to understand
-            // the problem of "out arguments with caller allocation" better.
-            // Some thoughts:
-            // 1. if the data is **copied** into a gir object/struct when passed back
-            //    to JS then we can safely implement a custom deleter for Args.out
-            //    that cleans this up.
-            // 2. if the pointer to the data is passed to a gir object/struct when
-            //    passed back to JS then that JS object should own it and be
-            //    responsible for cleaning it up.
-            // * both choices have caveats so it's worth understanding the
-            // implications
-            //   of each, or other options to solve this leak!
-            // * from reading GJS code, it seems like they copy the data before
-            // passing
-            // * to JS meaning option 1.
-            argument.v_pointer = g_slice_alloc0(argument_size);
-            return argument;
-        } else {
-            stringstream message;
-            message << "type \"" << g_type_tag_to_string(arg_type_tag) << "\" for out caller-allocates";
-            throw UnsupportedGIType(message.str());
-        }
-    }
-    // else, if we're not responsible for allocation then we can just return an
-    // empty GIArgument with a NULL .v_pointer (native call will set it with a
-    // memory location)
-    GIArgument argument = {.v_pointer = nullptr};
-    return argument;
+vector<GIArgument> Args::get_all_args() {
+    vector<GIArgument> args;
+    transform(this->params.begin(), this->params.end(), back_inserter(args), [](auto param) {
+        return param->get_argument();
+    });
+    return args;
 }
 
 GIArgument Args::arg_to_g_type(GIArgInfo &argument_info, Local<Value> js_value) {
@@ -231,6 +215,9 @@ GIArgument Args::type_to_g_type(GITypeInfo &argument_type_info, Local<Value> js_
             argument_value.v_double = js_value->NumberValue();
             break;
 
+        case GI_TYPE_TAG_ARRAY:
+            return Args::to_g_type_array(js_value, &argument_type_info);
+
         case GI_TYPE_TAG_UTF8:
         case GI_TYPE_TAG_FILENAME:
             if (!js_value->IsString()) {
@@ -314,40 +301,108 @@ GIArgument Args::type_to_g_type(GITypeInfo &argument_type_info, Local<Value> js_
     return argument_value;
 }
 
+int Args::get_g_type_array_length(GICallableInfo *callable_info,
+                                  vector<GIArgument> call_args,
+                                  GIArgument *array_arg,
+                                  GITypeInfo *array_arg_type) {
+    int length_arg_pos = g_type_info_get_array_length(array_arg_type);
+    if (length_arg_pos == -1) {
+        return -1;
+    }
+    GIArgInfo length_arg;
+    g_callable_info_load_arg(callable_info, length_arg_pos, &length_arg);
+    GIDirection length_direction = g_arg_info_get_direction(&length_arg);
+    if (length_direction == GI_DIRECTION_OUT || length_direction == GI_DIRECTION_INOUT) {
+        return *static_cast<int *>(call_args[length_arg_pos].v_pointer);
+    }
+    return call_args[length_arg_pos].v_int;
+}
+
 Local<Value> Args::from_g_type_array(GIArgument *arg, GITypeInfo *type, int array_length) {
     GIArrayType array_type_info = g_type_info_get_array_type(type);
     auto element_type_info = GIRInfoUniquePtr(g_type_info_get_param_type(type, 0));
-    GITypeTag param_tag = g_type_info_get_tag(element_type_info.get());
+
+    void *native_array = arg->v_pointer;
+    int length = array_length;
+    gsize element_size = get_type_size(element_type_info.get());
 
     switch (array_type_info) {
         case GI_ARRAY_TYPE_C:
-            if (g_type_info_is_zero_terminated(type)) {
-                GIArgument element;
-                gpointer *native_array = (gpointer *)arg->v_pointer;
-                Local<Array> js_array = Nan::New<Array>();
-                for (int i = 0; native_array[i]; i++) {
-                    element.v_pointer = native_array[i];
-                    Local<Value> js_element = Args::from_g_type(&element, element_type_info.get(), 0);
-                    js_array->Set(i, js_element);
+            if (length == -1) {
+                // first we handle the case where there was no array length
+                // provided when calling this method.
+                // this is the case when the array comes from a function call
+                // that doesn't have an out argument for the array's length.
+                // i.e. it returns a null terminated array or a fixed length array.
+                if (g_type_info_is_zero_terminated(type)) {
+                    // if the array is null terminated we can use a standard
+                    // string length method to find the array length
+                    length = g_strv_length(static_cast<gchar **>(native_array));
+                } else {
+                    // otherwise, if there's no length (length == -1) and
+                    // the array wasn't null terminated, it must have a fixed
+                    // size.
+                    length = g_type_info_get_array_fixed_size(type);
+                    if (length == -1) {
+                        // otherwise, if the array wasn't fixed size then we've exhausted
+                        // all the ways we available to find the array length.
+                        stringstream message;
+                        message << "unable to determine array length for C array";
+                        throw UnsupportedGIType(message.str());
+                    }
                 }
-                return js_array;
-            } else {
-                // use array_length param once the layers above this
-                // pas it correctly.
-                // the length param comes from the native function call's
-                // out arguments but, currently, it doesn't get passed own
-                // here correctly.
-                throw UnsupportedGIType("Converting non null terminated arrays is not yet supported");
             }
             break;
+        case GI_ARRAY_TYPE_ARRAY:
+        case GI_ARRAY_TYPE_BYTE_ARRAY: {
+            GArray *g_array = static_cast<GArray *>(native_array);
+            native_array = g_array->data;
+            length = g_array->len;
+            element_size = g_array_get_element_size(g_array);
+        } break;
+        case GI_ARRAY_TYPE_PTR_ARRAY: {
+            GPtrArray *ptr_array = static_cast<GPtrArray *>(native_array);
+            native_array = ptr_array->pdata;
+            length = ptr_array->len;
+            element_size = sizeof(gpointer);
+            break;
+        }
         default:
             throw UnsupportedGIType("cannot convert native array type");
     }
 
-    stringstream message;
-    message << "Converting array of type '" << g_type_tag_to_string(param_tag);
-    message << "' is not supported";
-    throw UnsupportedGIType(message.str());
+    if (native_array == nullptr || length == 0) {
+        return Nan::New<Array>(); // an empty array
+    }
+
+    GIArgument element;
+    Local<Array> js_array = Nan::New<Array>();
+    for (int i = 0; i < length; i++) {
+        // void** pointer = static_cast<void**>(static_cast<ulong>(native_array) + i * element_size);
+        void **pointer = static_cast<void **>(native_array + i * element_size);
+        memcpy(&element, pointer, element_size);
+        Nan::Set(js_array, i, Args::from_g_type(&element, element_type_info.get()));
+    }
+    return js_array;
+}
+
+GIArgument Args::to_g_type_array(Local<Value> value, GITypeInfo *info) {
+    GIArrayType array_type = g_type_info_get_array_type(info);
+    GIArgument arg;
+    switch (array_type) {
+        case GI_ARRAY_TYPE_C:
+            // TODO: what deallocates the memory created by GIRValue::to_c_array
+            arg.v_pointer = GIRValue::to_c_array(value, info);
+            break;
+        case GI_ARRAY_TYPE_ARRAY:
+        case GI_ARRAY_TYPE_BYTE_ARRAY:
+            // TODO: what deallocates the memory created by GIRValue::to_g_array
+            arg.v_pointer = GIRValue::to_g_array(value, info);
+            break;
+        default:
+            throw UnsupportedGIType("unsupported array type");
+    }
+    return arg;
 }
 
 // TODO: refactor this function and most of the code below this.

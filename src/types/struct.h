@@ -2,10 +2,10 @@
 
 #include <girepository.h>
 #include <glib.h>
+#include <internal/PersistentObjectStore.h>
 #include <nan.h>
 #include <v8.h>
 #include <vector>
-#include <internal/PersistentObjectStore.h>
 #include "util.h"
 
 namespace gir {

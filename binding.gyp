@@ -15,6 +15,8 @@
                 'src/types/param_spec.cpp',
                 'src/loop.cpp',
                 'src/closure.cpp',
+                'src/parameter.cpp',
+                'src/type.cpp',
             ],
             'include_dirs': [
                 '<!(node -e "require(\'nan\')")',
@@ -30,10 +32,11 @@
                 '-g'
             ],
             'cflags!': [
-                '-fno-exceptions'
+                '-fno-exceptions',
             ],
             'cflags_cc!': [
-                '-fno-exceptions'
+                '-fno-exceptions',
+                '-fno-rtti',
             ],
             'conditions': [
                 ['OS=="mac"', {

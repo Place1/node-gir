@@ -69,11 +69,13 @@ GIArgument GIRFunction::call_native(GIFunctionInfo *function_info, Args &args) {
     GIArgument return_value;
     GError *error = nullptr;
 
+    auto in_args = args.get_in_args();
+    auto out_args = args.get_out_args();
     g_function_info_invoke(function_info,
-                           args.in.data(),
-                           args.in.size(),
-                           args.out.data(),
-                           args.out.size(),
+                           in_args.data(),
+                           in_args.size(),
+                           out_args.data(),
+                           out_args.size(),
                            &return_value,
                            &error);
 
@@ -141,26 +143,29 @@ Local<Value> GIRFunction::js_return_value_from_native_call(GIFunctionInfo *funct
     GITypeInfo return_type_info;
     g_callable_info_load_return_type(function_info, &return_type_info);
 
+    auto out_args = args.get_out_args();
+    auto all_args = args.get_all_args();
+
     // if the function's metadata says to skip the return value (meaning the
     // return value is only useful in C) or the return value is void, then we can
     // skip the return value when determining what should be returned from native
     // to JS.
     bool skip_return_value = g_callable_info_skip_return(function_info) ||
                              g_type_info_get_tag(&return_type_info) == GI_TYPE_TAG_VOID;
-    int number_of_return_values = skip_return_value ? args.out.size() : args.out.size() + 1;
+    int number_of_return_values = skip_return_value ? out_args.size() : out_args.size() + 1;
 
     Local<Array> js_result_array = Nan::New<Array>(number_of_return_values);
 
     // if we should NOT skip the native return value, then we should convert it to
     // JS and set it in position 0 of the returned value array
     if (!skip_return_value) {
-        Local<Value> js_return_value = Args::from_g_type(&native_call_result, &return_type_info, 0);
+        Local<Value> js_return_value = Args::from_g_type(&native_call_result, &return_type_info);
         js_result_array->Set(0, js_return_value);
     }
 
     // We need to handle OUT arguments from the native call.
     // If we had some out args then
-    // foreach native argument, if it's an our arg, grab the next out arg from
+    // foreach native argument, if it's an out arg, grab the next out arg from
     // args and add it to the next position in the js_result_array. The code here
     // is a bit confusing because `g_callable_info_load_arg(info, index)` requires
     // the argument index where the index is relative to ALL arguments where as
@@ -170,16 +175,22 @@ Local<Value> GIRFunction::js_return_value_from_native_call(GIFunctionInfo *funct
                                                           // offset the out args by 1 i.e.
                                                           // [return_value, out-arg-1, out-arg-2, ...]
     int next_out_arg_pos = 0;
-    if (args.out.size() > 0) {
+    if (out_args.size() > 0) {
         for (int i = 0; i < g_callable_info_get_n_args(function_info); i++) {
             GIArgInfo argument_info;
             g_callable_info_load_arg(function_info, i, &argument_info);
             GIDirection argument_direction = g_arg_info_get_direction(&argument_info);
-            if (argument_direction == GI_DIRECTION_OUT) {
+            if (argument_direction == GI_DIRECTION_OUT || argument_direction == GI_DIRECTION_INOUT) {
                 GITypeInfo out_arg_type_info;
                 g_arg_info_load_type(&argument_info, &out_arg_type_info);
+                int length = Args::get_g_type_array_length(function_info,
+                                                           all_args,
+                                                           &out_args[next_out_arg_pos],
+                                                           &out_arg_type_info);
                 js_result_array->Set(js_results_array_pos,
-                                     Args::from_g_type(&args.out[next_out_arg_pos], &out_arg_type_info, 0));
+                                     Args::from_g_type(static_cast<GIArgument *>(out_args[next_out_arg_pos].v_pointer),
+                                                       &out_arg_type_info,
+                                                       length));
                 next_out_arg_pos += 1;
                 js_results_array_pos += 1;
             }
